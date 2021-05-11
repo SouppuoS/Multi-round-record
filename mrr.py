@@ -14,7 +14,7 @@ def getWavInSpkOrder(path):
         data.append({'spk': os.path.basename(rt), 'utt': path_a})
     return data
 
-def generate(data, n_src, k_min, k_max, beta, R, outpth):
+def generate(data, n_src, k_min, k_max, beta, R, uep, outpth):
     
     p_mix = os.path.join(outpth, 'mix_clean')
     p_gt  = []
@@ -24,38 +24,44 @@ def generate(data, n_src, k_min, k_max, beta, R, outpth):
         os.makedirs(p_gt[i], exist_ok=True)
         
     for spkIds in combinations(range(len(data)), n_src):
-        gt    = [np.zeros(1) for _ in range(n_src)]
-        t     = 0
-        fname = ''
-        for spk in spkIds:
-            fname += data[spk]['spk'] + '-'
-        for _ in range(k_min, k_max + 1):
-            for i, spk in enumerate(spkIds):
-                utts   = data[spk]['utt']
-                uttId  = random.randint(0, len(utts) - 1)
-                wav, _ = sf.read(utts[uttId])
-                # 16khz->8khz
-                wav    = wav[::2]
-                dB     = (random.random() * 2 - 1) * R
-                wav   *= 10 ** (dB / 20.)
-                
-                t      = 0 if t == 0 else max(t + random.randint(-beta, beta), 0)
-                t_new  = t + len(wav)
-                
-                gt[i] = np.pad(gt[i], (0, t_new - len(gt[i])))
-                gt[i][t:t_new] = wav
-                
-                t = t_new
-        gt = [np.pad(g, (0, t - len(g))) for g in gt]
-        o  = np.zeros(gt[0].shape)
-        for i in range(n_src):
-            sf.write(os.path.join(p_gt[i], fname + '.wav'), gt[i], 8000, subtype='FLOAT')
-            o += gt[i]
-        sf.write(os.path.join(p_mix, fname + '.wav'), o, 8000, subtype='FLOAT')
+        for uepNbr in range(uep):
+            gt         = [np.zeros(1) for _ in range(n_src)]
+            t          = 0
+            beta_0_max = 0
+            fname      = ''
+            for spk in spkIds:
+                fname += data[spk]['spk'] + '-'
+            for _ in range(k_min, k_max + 1):
+                for i, spk in enumerate(spkIds):
+                    utts   = data[spk]['utt']
+                    uttId  = random.randint(0, len(utts) - 1)
+                    wav, _ = sf.read(utts[uttId])
+                    # 16khz->8khz
+                    wav    = wav[::2]
+                    dB     = (random.random() * 2 - 1) * R
+                    wav   *= 10 ** (dB / 20.)
+                    
+                    shift  = random.randint(-max(min(beta[0], beta_0_max), 0), beta[1])
+                    t     += shift
+                    t_new  = t + len(wav)
+                    
+                    gt[i] = np.pad(gt[i], (0, t_new - len(gt[i])))
+                    gt[i][t:t_new] = wav
+                    
+                    t          = t_new
+                    beta_0_max = len(wav) + shift
+            
+            t  = max([len(gt[i]) for i in range(n_src)])
+            gt = [np.pad(g, (0, t - len(g))) for g in gt]
+            o  = np.zeros(gt[0].shape)
+            for i in range(n_src):
+                sf.write(os.path.join(p_gt[i], fname + '.wav'), gt[i], 8000, subtype='FLOAT')
+                o += gt[i]
+            sf.write(os.path.join(p_mix, fname + f'{uepNbr}.wav'), o, 8000, subtype='FLOAT')
     
 def genWsj0MRR(path, conf):
     data = getWavInSpkOrder(path)
-    generate(data, 2, conf.kmin, conf.kmax, conf.beta, 2.5, conf.o)
+    generate(data, 2, conf.kmin, conf.kmax, (conf.beta_min, conf.beta_max), 2.5, conf.UEPair, conf.o)
         
 
 if __name__ == '__main__':
@@ -66,7 +72,9 @@ if __name__ == '__main__':
     parse.add_argument("--o",     default='tmp',    type=str,   help='output path')
     parse.add_argument("--kmin",  default=1,        type=int,   help='k_min')
     parse.add_argument("--kmax",  default=1,        type=int,   help='k_max')
-    parse.add_argument("--beta",  default=0,        type=int,   help='shift range')
+    parse.add_argument("--UEPair",      default=1,  type=int,   help='number of generated utterance for each speaker pair')
+    parse.add_argument("--beta_min",    default=0,  type=int,   help='shift range min')
+    parse.add_argument("--beta_max",    default=0,  type=int,   help='shift range max')
     
     conf     = parse.parse_args()
     pathData = [conf.tr, conf.cv, conf.tt]
